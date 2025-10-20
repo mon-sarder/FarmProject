@@ -1,309 +1,257 @@
+package app;
+
 import javax.swing.*;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
+import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.awt.event.ActionEvent;
-import java.awt.event.ActionListener;
-import java.awt.event.WindowAdapter;
-import java.awt.event.WindowEvent;
+import java.util.List;
 
-// This is your new "View" and "Controller"
-public class MainGUI {
+/**
+ * A tidy Swing GUI that exposes two tabs:
+ *  - Inventory (backed by ArrayListMethods)
+ *  - Customer Queue (backed by CustomerQueue)
+ */
+public class MainGUI extends JFrame {
 
-    // These are your "Model" classes.
-    // They must be refactored as described in step 1.
-    private ArrayListMethods arrayListMethods;
-    private CustomerQueue customerQueue;
+    private final ArrayListMethods inventory = new ArrayListMethods();
+    private final CustomerQueue queue = new CustomerQueue();
 
-    // --- GUI Components ---
-    private JFrame mainFrame;
-    private JTabbedPane tabbedPane;
+    // Inventory UI
+    private final DefaultTableModel inventoryModel = new DefaultTableModel(new Object[]{"Item", "Qty"}, 0) {
+        @Override public boolean isCellEditable(int row, int column) { return false; }
+    };
+    private final JTable inventoryTable = new JTable(inventoryModel);
+    private final JTextField itemNameField = new JTextField();
+    private final JSpinner itemQtyField = new JSpinner(new SpinnerNumberModel(1, 0, 100000, 1));
+    private final JTextField searchItemField = new JTextField();
 
-    // --- Crop Tab Components ---
-    private JPanel cropPanel;
-    private JTextArea cropCatalogArea; // To display the catalog
-    private JTextField cropNameField;
-    private JTextField cropQuantityField;
-    private JTextField cropRemoveField;
-    private JTextField cropOldNameField;
-    private JTextField cropNewNameField;
+    // Queue UI
+    private final DefaultTableModel queueModel = new DefaultTableModel(new Object[]{"Name", "Note"}, 0) {
+        @Override public boolean isCellEditable(int row, int column) { return false; }
+    };
+    private final JTable queueTable = new JTable(queueModel);
+    private final JTextField customerNameField = new JTextField();
+    private final JTextField customerNoteField = new JTextField();
+    private final JTextField searchCustomerField = new JTextField();
 
-    // --- Customer Tab Components ---
-    private JPanel customerPanel;
-    private JTextArea customerLogArea;
-    // (You would add text fields and buttons for customers here)
-
-    // --- Queue Tab Components ---
-    private JPanel queuePanel;
-    private JTextArea queueArea;
-    // (You would add text fields and buttons for the queue here)
-
-
-    /**
-     * Constructor: Sets up the entire GUI
-     */
     public MainGUI() {
-        // 1. Initialize your backend logic
-        arrayListMethods = new ArrayListMethods();
-        customerQueue = new CustomerQueue();
+        super("Customer Queue & Inventory");
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setSize(800, 600);
+        setLocationRelativeTo(null);
 
-        // 2. Load data from files (just like your old main method)
-        arrayListMethods.uploadArrayFiles();
-        customerQueue.uploadQueueFiles();
+        JTabbedPane tabs = new JTabbedPane();
+        tabs.addTab("Inventory", buildInventoryPanel());
+        tabs.addTab("Customer Queue", buildQueuePanel());
 
-        // 3. Set up the main window
-        mainFrame = new JFrame("Lopez Urban Farm Management");
-        mainFrame.setSize(800, 600);
-        mainFrame.setLayout(new BorderLayout());
-        mainFrame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE); // We handle closing
+        setContentPane(tabs);
+        setVisible(true);
+        refreshInventoryTable();
+        refreshQueueTable();
+    }
 
-        // --- 4. Create the Menu Bar (for Save/Exit) ---
-        JMenuBar menuBar = new JMenuBar();
-        JMenu fileMenu = new JMenu("File");
-        JMenuItem saveItem = new JMenuItem("Save");
-        JMenuItem exitItem = new JMenuItem("Exit");
+    private JPanel buildInventoryPanel() {
+        JPanel root = new JPanel(new BorderLayout(8,8));
+        root.setBorder(BorderFactory.createEmptyBorder(12,12,12,12));
 
-        fileMenu.add(saveItem);
-        fileMenu.add(exitItem);
-        menuBar.add(fileMenu);
-        mainFrame.setJMenuBar(menuBar);
+        // Top: Add/Set
+        JPanel addPanel = new JPanel(new GridLayout(2, 1, 6,6));
+        JPanel row1 = new JPanel(new BorderLayout(8,8));
+        row1.add(new JLabel("Item name:"), BorderLayout.WEST);
+        row1.add(itemNameField, BorderLayout.CENTER);
+        JPanel row2 = new JPanel(new BorderLayout(8,8));
+        row2.add(new JLabel("Quantity:"), BorderLayout.WEST);
+        row2.add(itemQtyField, BorderLayout.CENTER);
 
-        // --- 5. Create the Tabbed Pane ---
-        tabbedPane = new JTabbedPane();
+        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 8,0));
+        buttons.add(new JButton(new AbstractAction("Add / Increment") {
+            @Override public void actionPerformed(ActionEvent e) {
+                String n = itemNameField.getText().trim();
+                int q = (Integer) itemQtyField.getValue();
+                if (n.isEmpty() || q <= 0) {
+                    JOptionPane.showMessageDialog(MainGUI.this, "Enter a name and positive quantity.");
+                    return;
+                }
+                try {
+                    inventory.addOrIncrement(n, q);
+                    itemNameField.setText("");
+                    itemQtyField.setValue(1);
+                    refreshInventoryTable();
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(MainGUI.this, ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }));
+        buttons.add(new JButton(new AbstractAction("Set Quantity") {
+            @Override public void actionPerformed(ActionEvent e) {
+                String n = itemNameField.getText().trim();
+                int q = (Integer) itemQtyField.getValue();
+                if (n.isEmpty() || q < 0) {
+                    JOptionPane.showMessageDialog(MainGUI.this, "Enter a name and non-negative quantity.");
+                    return;
+                }
+                try {
+                    inventory.setQuantity(n, q);
+                    refreshInventoryTable();
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(MainGUI.this, ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }));
+        addPanel.add(row1);
+        addPanel.add(row2);
 
-        // --- Create the three tabs ---
-        initCropTab();
-        initCustomerTab();
-        initQueueTab();
+        JPanel north = new JPanel(new BorderLayout(8,8));
+        north.add(addPanel, BorderLayout.CENTER);
+        north.add(buttons, BorderLayout.EAST);
 
-        tabbedPane.addTab("Crop Catalog", cropPanel);
-        tabbedPane.addTab("Customer Log", customerPanel);
-        tabbedPane.addTab("Customer Queue", queuePanel);
+        // Center: Table
+        inventoryTable.setFillsViewportHeight(true);
+        JScrollPane scroll = new JScrollPane(inventoryTable);
 
-        mainFrame.add(tabbedPane, BorderLayout.CENTER);
-
-        // --- 6. Add Listeners (The "Controller" part) ---
-
-        // Listener for the "Save" menu item
-        saveItem.addActionListener(e -> saveAllData());
-
-        // Listener for the "Exit" menu item
-        exitItem.addActionListener(e -> exitProgram());
-
-        // Listener for the Window 'X' button
-        mainFrame.addWindowListener(new WindowAdapter() {
-            @Override
-            public void windowClosing(WindowEvent e) {
-                exitProgram();
+        // South: search + delete
+        JPanel south = new JPanel(new BorderLayout(8,8));
+        south.add(new JLabel("Search:"), BorderLayout.WEST);
+        south.add(searchItemField, BorderLayout.CENTER);
+        JButton deleteBtn = new JButton(new AbstractAction("Delete Selected") {
+            @Override public void actionPerformed(ActionEvent e) {
+                int row = inventoryTable.getSelectedRow();
+                if (row == -1) return;
+                String name = (String) inventoryModel.getValueAt(row, 0);
+                try {
+                    boolean ok = inventory.remove(name);
+                    if (!ok) JOptionPane.showMessageDialog(MainGUI.this, "Item not found.");
+                    refreshInventoryTable();
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(MainGUI.this, ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+                }
             }
         });
+        south.add(deleteBtn, BorderLayout.EAST);
 
-        // --- 7. Make the window visible ---
-        mainFrame.setLocationRelativeTo(null); // Center on screen
-        mainFrame.setVisible(true);
+        searchItemField.getDocument().addDocumentListener(simple(() -> filterInventory(searchItemField.getText())));
 
-        // --- 8. Load initial data into text areas ---
-        refreshCropCatalog();
-        refreshCustomerLog();
-        refreshQueue();
+        root.add(north, BorderLayout.NORTH);
+        root.add(scroll, BorderLayout.CENTER);
+        root.add(south, BorderLayout.SOUTH);
+        return root;
     }
 
+    private JPanel buildQueuePanel() {
+        JPanel root = new JPanel(new BorderLayout(8,8));
+        root.setBorder(BorderFactory.createEmptyBorder(12,12,12,12));
 
-    /**
-     * Creates the "Crop Catalog" tab
-     */
-    private void initCropTab() {
-        cropPanel = new JPanel(new BorderLayout(10, 10)); // 10px h/v gap
-        cropPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10)); // 10px margin
+        // Top form
+        JPanel form = new JPanel(new GridLayout(2,2,6,6));
+        form.add(new JLabel("Customer name:"));
+        form.add(customerNameField);
+        form.add(new JLabel("Note (optional):"));
+        form.add(customerNoteField);
 
-        // --- Center: The Catalog Display ---
-        cropCatalogArea = new JTextArea("Loading catalog...");
-        cropCatalogArea.setEditable(false);
-        JScrollPane scrollPane = new JScrollPane(cropCatalogArea); // Make it scrollable
-        cropPanel.add(scrollPane, BorderLayout.CENTER);
+        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.LEFT, 8,0));
+        buttons.add(new JButton(new AbstractAction("Enqueue") {
+            @Override public void actionPerformed(ActionEvent e) {
+                String name = customerNameField.getText().trim();
+                String note = customerNoteField.getText().trim();
+                if (name.isEmpty()) {
+                    JOptionPane.showMessageDialog(MainGUI.this, "Enter a customer name.");
+                    return;
+                }
+                queue.enqueue(new CustomerQueue.Customer(name, note));
+                customerNameField.setText("");
+                customerNoteField.setText("");
+                refreshQueueTable();
+            }
+        }));
+        buttons.add(new JButton(new AbstractAction("Serve Next (Dequeue)") {
+            @Override public void actionPerformed(ActionEvent e) {
+                queue.dequeue();
+                refreshQueueTable();
+            }
+        }));
+        buttons.add(new JButton(new AbstractAction("Clear") {
+            @Override public void actionPerformed(ActionEvent e) {
+                queue.clear();
+                refreshQueueTable();
+            }
+        }));
 
-        // --- Bottom: The Action Buttons ---
-        JPanel actionPanel = new JPanel(new GridLayout(0, 2, 10, 10)); // 0 rows, 2 cols, 10px gaps
+        JPanel north = new JPanel(new BorderLayout(8,8));
+        north.add(form, BorderLayout.CENTER);
+        north.add(buttons, BorderLayout.EAST);
 
-        // Add/Update
-        actionPanel.add(new JLabel("Crop Name:"));
-        cropNameField = new JTextField();
-        actionPanel.add(cropNameField);
+        // Table
+        queueTable.setFillsViewportHeight(true);
+        JScrollPane scroll = new JScrollPane(queueTable);
 
-        actionPanel.add(new JLabel("Quantity to Add:"));
-        cropQuantityField = new JTextField();
-        actionPanel.add(cropQuantityField);
+        // South search
+        JPanel south = new JPanel(new BorderLayout(8,8));
+        south.add(new JLabel("Search by name:"), BorderLayout.WEST);
+        south.add(searchCustomerField, BorderLayout.CENTER);
 
-        JButton addButton = new JButton("Add / Update Crop");
-        actionPanel.add(addButton);
+        searchCustomerField.getDocument().addDocumentListener(simple(() -> filterQueue(searchCustomerField.getText())));
 
-        JButton refreshButton = new JButton("Refresh Catalog");
-        actionPanel.add(refreshButton);
-
-        // --- Add other actions (Remove, Edit, Search) ---
-        // You would add more fields and buttons here for:
-        // - Search (1 field, 1 button)
-        // - Remove (1 field for name, 1 for quantity, 1 button)
-        // - Edit Name (2 fields, 1 button)
-
-        cropPanel.add(actionPanel, BorderLayout.SOUTH);
-
-
-        // --- ACTION LISTENERS for this tab ---
-
-        refreshButton.addActionListener(e -> refreshCropCatalog());
-
-        addButton.addActionListener(e -> addCropItem());
+        root.add(north, BorderLayout.NORTH);
+        root.add(scroll, BorderLayout.CENTER);
+        root.add(south, BorderLayout.SOUTH);
+        return root;
     }
 
-    /**
-     * Creates the "Customer Log" tab (Placeholder)
-     */
-    private void initCustomerTab() {
-        customerPanel = new JPanel(new BorderLayout());
-        customerLogArea = new JTextArea("Customer log will appear here.");
-        customerLogArea.setEditable(false);
-        customerPanel.add(new JScrollPane(customerLogArea), BorderLayout.CENTER);
-
-        // TODO: Create a JPanel with text fields and buttons for:
-        // - Search Customer
-        // - Add/Update Customer
-        // - Remove Customer
-        // - Edit Customer
-        // Add that panel to BorderLayout.SOUTH
+    private void refreshInventoryTable() {
+        List<ArrayListMethods.Item> data = inventory.list();
+        inventoryModel.setRowCount(0);
+        for (ArrayListMethods.Item it : data) {
+            inventoryModel.addRow(new Object[]{ it.getName(), it.getQuantity() });
+        }
     }
 
-    /**
-     * Creates the "Customer Queue" tab (Placeholder)
-     */
-    private void initQueueTab() {
-        queuePanel = new JPanel(new BorderLayout());
-        queueArea = new JTextArea("Customer queue will appear here.");
-        queueArea.setEditable(false);
-        queuePanel.add(new JScrollPane(queueArea), BorderLayout.CENTER);
-
-        // TODO: Create a JPanel with text fields and buttons for:
-        // - Add to Queue
-        // - Process Next Customer
-        // Add that panel to BorderLayout.SOUTH
-    }
-
-
-    // --- ================================== ---
-    // --- CONTROLLER METHODS (handle actions) ---
-    // --- ================================== ---
-
-    private void refreshCropCatalog() {
-        // This calls your *refactored* backend method
-        // You must create "getCatalogAsString()" in ArrayListMethods
-        // String catalogData = arrayListMethods.getCatalogAsString();
-        // cropCatalogArea.setText(catalogData);
-
-        // --- Temporary message until refactored ---
-        cropCatalogArea.setText("Please refactor ArrayListMethods to include:\npublic String getCatalogAsString() { ... }");
-    }
-
-    private void refreshCustomerLog() {
-        // TODO: You need to create a "getCustomerLogAsString()"
-        // method in ArrayListMethods, similar to getCatalogAsString()
-
-        // String logData = arrayListMethods.getCustomerLogAsString();
-        // customerLogArea.setText(logData);
-    }
-
-    private void refreshQueue() {
-        // TODO: You need to create a "getQueueAsString()"
-        // method in CustomerQueue
-
-        // String queueData = customerQueue.getQueueAsString();
-        // queueArea.setText(queueData);
-    }
-
-    /**
-     * Example action for the "Add Crop" button
-     */
-    private void addCropItem() {
-        String name = cropNameField.getText();
-        String quantityStr = cropQuantityField.getText();
-
-        if (name.isEmpty()) {
-            JOptionPane.showMessageDialog(mainFrame, "Please enter a crop name.", "Error", JOptionPane.ERROR_MESSAGE);
+    private void filterInventory(String q) {
+        if (q == null || q.isBlank()) {
+            refreshInventoryTable();
             return;
         }
+        List<ArrayListMethods.Item> data = inventory.search(q);
+        inventoryModel.setRowCount(0);
+        for (ArrayListMethods.Item it : data) {
+            inventoryModel.addRow(new Object[]{ it.getName(), it.getQuantity() });
+        }
+    }
 
-        int quantity;
-        try {
-            quantity = Integer.parseInt(quantityStr);
-            if (quantity < 0) throw new NumberFormatException();
-        } catch (NumberFormatException ex) {
-            JOptionPane.showMessageDialog(mainFrame, "Please enter a valid, positive quantity.", "Error", JOptionPane.ERROR_MESSAGE);
+    private void refreshQueueTable() {
+        List<CustomerQueue.Customer> data = queue.toList();
+        queueModel.setRowCount(0);
+        for (CustomerQueue.Customer c : data) {
+            queueModel.addRow(new Object[]{ c.getName(), c.getNote() });
+        }
+    }
+
+    private void filterQueue(String q) {
+        if (q == null || q.isBlank()) {
+            refreshQueueTable();
             return;
         }
-
-        // Call the *refactored* backend method.
-        // It should return a success message.
-        // String result = arrayListMethods.addItem(name, quantity);
-
-        // --- !!! ---
-        // NOTE: Your old `addItem` method prints to console. You MUST refactor it
-        // to return a String, like "Apple added." or "Apple quantity updated."
-
-        // --- Temporary call until refactored ---
-        arrayListMethods.addItem(name, quantity);
-        String result = "Item " + name + " processed.\n(Refactor addItem to return a status message!)";
-        // ---
-
-
-        JOptionPane.showMessageDialog(mainFrame, result, "Success", JOptionPane.INFORMATION_MESSAGE);
-
-        // Clear fields and refresh the display
-        cropNameField.setText("");
-        cropQuantityField.setText("");
-        refreshCropCatalog();
-    }
-
-
-    private void saveAllData() {
-        arrayListMethods.saveArrayFiles();
-        customerQueue.saveQueueFiles();
-        JOptionPane.showMessageDialog(mainFrame, "Data saved successfully!", "Save", JOptionPane.INFORMATION_MESSAGE);
-    }
-
-    private void exitProgram() {
-        // Show a confirmation dialog
-        int choice = JOptionPane.showConfirmDialog(
-                mainFrame,
-                "Do you want to save your changes before exiting?",
-                "Exit Program",
-                JOptionPane.YES_NO_CANCEL_OPTION,
-                JOptionPane.QUESTION_MESSAGE
-        );
-
-        if (choice == JOptionPane.YES_OPTION) {
-            saveAllData();
-            System.exit(0);
-        } else if (choice == JOptionPane.NO_OPTION) {
-            System.exit(0);
+        List<CustomerQueue.Customer> data = queue.searchByName(q);
+        queueModel.setRowCount(0);
+        for (CustomerQueue.Customer c : data) {
+            queueModel.addRow(new Object[]{ c.getName(), c.getNote() });
         }
-        // If CANCEL_OPTION, do nothing and stay in the program.
     }
 
+    private static DocumentListener simple(Runnable onChange) {
+        return new DocumentListener() {
+            @Override public void insertUpdate(DocumentEvent e) { onChange.run(); }
+            @Override public void removeUpdate(DocumentEvent e) { onChange.run(); }
+            @Override public void changedUpdate(DocumentEvent e) { onChange.run(); }
+        };
+    }
 
-    /**
-     * The new main method. Replaces CatalogProgram.main()
-     */
     public static void main(String[] args) {
-        // This makes Swing GUIs look a bit more modern (less "1990s")
         try {
             UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
+        } catch (Exception ignored) {}
 
-        // Runs the GUI constructor on the correct thread
-        SwingUtilities.invokeLater(new Runnable() {
-            @Override
-            public void run() {
-                new MainGUI();
-            }
-        });
+        SwingUtilities.invokeLater(MainGUI::new);
     }
 }
