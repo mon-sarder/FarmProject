@@ -9,16 +9,24 @@ import java.awt.event.ActionEvent;
 import java.util.List;
 
 /**
- * A tidy Swing GUI that exposes two tabs:
- *  - Inventory (backed by ArrayListMethods)
- *  - Customer Queue (backed by CustomerQueue)
+ * A tidy Swing GUI that now includes a Login/Register panel
+ * and uses a CardLayout to show the main app only after successful login.
  */
 public class MainGUI extends JFrame {
 
+    // --- CardLayout Constants ---
+    private static final String LOGIN_PANEL = "LoginPanel";
+    private static final String APP_PANEL = "AppPanel";
+
+    private final CardLayout cardLayout = new CardLayout();
+    private final JPanel mainPanel = new JPanel(cardLayout);
+
+    // --- Auth ---
+    private final AuthService authService = new AuthService();
+
+    // --- App UI Components ---
     private final ArrayListMethods inventory = new ArrayListMethods();
     private final CustomerQueue queue = new CustomerQueue();
-
-    // Inventory UI
     private final DefaultTableModel inventoryModel = new DefaultTableModel(new Object[]{"Item", "Qty"}, 0) {
         @Override public boolean isCellEditable(int row, int column) { return false; }
     };
@@ -26,8 +34,6 @@ public class MainGUI extends JFrame {
     private final JTextField itemNameField = new JTextField();
     private final JSpinner itemQtyField = new JSpinner(new SpinnerNumberModel(1, 0, 100000, 1));
     private final JTextField searchItemField = new JTextField();
-
-    // Queue UI
     private final DefaultTableModel queueModel = new DefaultTableModel(new Object[]{"Name", "Note"}, 0) {
         @Override public boolean isCellEditable(int row, int column) { return false; }
     };
@@ -36,20 +42,159 @@ public class MainGUI extends JFrame {
     private final JTextField customerNoteField = new JTextField();
     private final JTextField searchCustomerField = new JTextField();
 
+    // --- Login UI Components ---
+    private final JTextField loginUserField = new JTextField(20);
+    private final JPasswordField loginPassField = new JPasswordField(20);
+    private final JTextField regUserField = new JTextField(20);
+    private final JPasswordField regPassField = new JPasswordField(20);
+    private final JLabel loginErrorLabel = new JLabel(" ");
+
     public MainGUI() {
         super("Customer Queue & Inventory");
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setSize(800, 600);
         setLocationRelativeTo(null);
 
+        // Build the two main panels
+        JPanel loginPanel = buildLoginPanel();
+        JPanel appPanel = buildAppPanel(); // This contains your original tabbed UI
+
+        mainPanel.add(loginPanel, LOGIN_PANEL);
+        mainPanel.add(appPanel, APP_PANEL);
+
+        // Start by showing the login panel
+        cardLayout.show(mainPanel, LOGIN_PANEL);
+
+        setContentPane(mainPanel);
+        setVisible(true);
+    }
+
+    /**
+     * Builds the Login/Register UI panel.
+     */
+    private JPanel buildLoginPanel() {
+        JPanel panel = new JPanel(new GridBagLayout());
+        panel.setBorder(BorderFactory.createEmptyBorder(20, 20, 20, 20));
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+
+        // --- Login Section ---
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        gbc.gridwidth = 2;
+        panel.add(new JLabel("<html><h2>Login</h2></html>"), gbc);
+
+        gbc.gridy = 1;
+        gbc.gridwidth = 1;
+        panel.add(new JLabel("Username:"), gbc);
+        gbc.gridx = 1;
+        panel.add(loginUserField, gbc);
+
+        gbc.gridy = 2;
+        gbc.gridx = 0;
+        panel.add(new JLabel("Password:"), gbc);
+        gbc.gridx = 1;
+        panel.add(loginPassField, gbc);
+
+        gbc.gridy = 3;
+        gbc.gridx = 1;
+        gbc.anchor = GridBagConstraints.LINE_START;
+        JButton loginButton = new JButton("Login");
+        panel.add(loginButton, gbc);
+
+        // --- Error Label ---
+        gbc.gridy = 4;
+        gbc.gridx = 0;
+        gbc.gridwidth = 2;
+        loginErrorLabel.setForeground(Color.RED);
+        panel.add(loginErrorLabel, gbc);
+
+        // --- Registration Section ---
+        gbc.gridy = 5;
+        gbc.gridx = 0;
+        gbc.gridwidth = 2;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        panel.add(new JSeparator(), gbc);
+
+        gbc.gridy = 6;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        panel.add(new JLabel("<html><h3>Register New User</h3></html>"), gbc);
+
+        gbc.gridy = 7;
+        gbc.gridwidth = 1;
+        panel.add(new JLabel("Username:"), gbc);
+        gbc.gridx = 1;
+        panel.add(regUserField, gbc);
+
+        gbc.gridy = 8;
+        gbc.gridx = 0;
+        panel.add(new JLabel("Password:"), gbc);
+        gbc.gridx = 1;
+        panel.add(regPassField, gbc);
+
+        gbc.gridy = 9;
+        gbc.gridx = 1;
+        gbc.anchor = GridBagConstraints.LINE_START;
+        JButton registerButton = new JButton("Register");
+        panel.add(registerButton, gbc);
+
+        // --- Actions ---
+        loginButton.addActionListener(e -> handleLogin());
+        registerButton.addActionListener(e -> handleRegister());
+
+        return panel;
+    }
+
+    private void handleLogin() {
+        AuthDtos.LoginDTO dto = new AuthDtos.LoginDTO(
+                loginUserField.getText(),
+                new String(loginPassField.getPassword())
+        );
+
+        if (authService.login(dto)) {
+            // SUCCESS: Switch to the main app panel
+            loginErrorLabel.setText(" ");
+            cardLayout.show(mainPanel, APP_PANEL);
+            // Load initial data *after* logging in
+            refreshInventoryTable();
+            refreshQueueTable();
+        } else {
+            // FAILED: Show error
+            loginErrorLabel.setText("Invalid username or password.");
+        }
+    }
+
+    private void handleRegister() {
+        AuthDtos.RegisterDTO dto = new AuthDtos.RegisterDTO(
+                regUserField.getText(),
+                new String(regPassField.getPassword())
+        );
+
+        try {
+            authService.register(dto);
+            loginErrorLabel.setText(" ");
+            JOptionPane.showMessageDialog(this, "Registration successful! You can now log in.", "Success", JOptionPane.INFORMATION_MESSAGE);
+            regUserField.setText("");
+            regPassField.setText("");
+        } catch (IllegalArgumentException e) {
+            // FAILED: Show error from validation
+            loginErrorLabel.setText(" ");
+            JOptionPane.showMessageDialog(this, e.getMessage(), "Registration Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+
+    /**
+     * Builds the main application panel (your original UI).
+     */
+    private JPanel buildAppPanel() {
         JTabbedPane tabs = new JTabbedPane();
         tabs.addTab("Inventory", buildInventoryPanel());
         tabs.addTab("Customer Queue", buildQueuePanel());
 
-        setContentPane(tabs);
-        setVisible(true);
-        refreshInventoryTable();
-        refreshQueueTable();
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.add(tabs, BorderLayout.CENTER);
+        return panel;
     }
 
     private JPanel buildInventoryPanel() {
@@ -252,6 +397,8 @@ public class MainGUI extends JFrame {
             UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
         } catch (Exception ignored) {}
 
+        // This now launches the GUI which will show the login panel first.
         SwingUtilities.invokeLater(MainGUI::new);
     }
 }
+
